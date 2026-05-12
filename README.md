@@ -31,6 +31,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
 | Moore Threads | Supported | - |
 | Hygon | Merging | [PR #78](https://github.com/flagos-ai/vllm-plugin-FL/pull/78) |
+| Sunrise | Supported | - |
 
 ## Quick Start
 
@@ -73,6 +74,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     # or editble install
     pip install --no-build-isolation -e .
     ```
+    Note: if on Sunrize platform, depends on FlagGems [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
