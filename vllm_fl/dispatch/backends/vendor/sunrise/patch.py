@@ -306,8 +306,15 @@ def patch_fused_topk_bias_router():
 
 def patch_memory_profiling_for_plain_allocator():
     """Fix KV-cache OOM caused by weights being double-counted on PTPU.
-    since ``torch_ptpu`` ships a "plain"-style device allocator that does not register
-    with PyTorch's caching allocator, ``torch.memory_reserved()`` is always ~0 on PTPU. 
+
+    ``torch_ptpu`` ships a "plain"-style device allocator that does not register
+    with PyTorch's caching allocator, so ``torch.memory_reserved()`` is always
+    ~0 on PTPU. The shared :func:`memory_profiling_fl` computes
+    ``non_torch = cuda_used - torch_reserved``; with ``torch_reserved == 0``
+    this leaks the model weights into ``non_torch``. The final
+    ``non_kv_cache = weights + peak_act + non_torch`` then counts weights
+    twice, yielding a phantom OOM in ``determine_available_memory`` even when
+    the device has plenty of free memory.
     """
     try:
         from vllm.platforms import current_platform
