@@ -206,10 +206,12 @@ class GraphWrapper:
             except (ImportError, RuntimeError):
                 pass
 
-            # FL-specific: use platform-agnostic graph capture
-            with current_platform.torch_device_fn.graph(
-                graph, pool=self.graph_pool
-            ):
+            graph_kwargs: dict[str, Any] = {"pool": self.graph_pool}
+            if current_platform.device_type == "ptpu":
+                graph_kwargs["stream"] = (
+                    current_platform.torch_device_fn.current_stream()
+                )
+            with current_platform.torch_device_fn.graph(graph, **graph_kwargs):
                 # `output` is managed by pytorch's cudagraph pool
                 output = self.runnable(*args, **kwargs)
                 # Join offloader's copy stream after forward if available
