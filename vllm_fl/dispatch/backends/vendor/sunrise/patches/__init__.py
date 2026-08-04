@@ -19,6 +19,7 @@ Classification
 from . import patch_fla_ops
 from . import patch_gdn_core_attn_buf
 from . import patch_int8_native
+from . import patch_moe_config
 from . import patch_pointwise
 from . import patch_profile_decode
 from . import patch_profiler
@@ -34,6 +35,10 @@ patch_gdn_core_attn_buf.apply_patch()
 
 # compressed-tensors INT8 (W8A8) enablement on PTPU; no-op for BF16 models.
 patch_int8_native.enable_native_int8()
+
+# Fused-MoE tile config from FlagGems' sunrise backend, not vLLM's NVIDIA
+# heuristic (whose prefill tile overflows PTPU registers and hangs the w2 GEMM).
+patch_moe_config.apply_patch()
 
 # Optional per-operator decode-step profiler (env-gated).
 patch_profile_decode.install()
