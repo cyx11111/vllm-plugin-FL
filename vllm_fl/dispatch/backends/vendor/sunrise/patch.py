@@ -43,6 +43,50 @@ def apply_sunrise_patches():
     patch_mla_gather_cache_ops()
     patch_ptpu_trunc_normal_init()
     patch_minicpmo_resampler_device()
+    patch_moe_force_config()
+
+
+def patch_moe_force_config() -> None:
+    """Pin the fused-MoE tile config, for bisecting tile-dependent bugs.
+
+    vLLM derives BLOCK_SIZE_* from the token count alone and exposes no flag to
+    fix them, but ``try_get_optimal_moe_config`` consults a module global before
+    any heuristic, which is what this sets. BLOCK_SIZE_M also reaches
+    moe_align_block_size, so the padding follows along.
+
+    Off unless VLLM_FL_MOE_FORCE_CONFIG holds a JSON object, e.g.
+    '{"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64,
+      "GROUP_SIZE_M": 1, "num_warps": 8, "num_stages": 3}'
+    """
+    raw = os.environ.get("VLLM_FL_MOE_FORCE_CONFIG", "").strip()
+    if not raw:
+        return
+
+    import json
+
+    import vllm.model_executor.layers.fused_moe as vllm_fused_moe
+
+    config = json.loads(raw)
+    required = {
+        "BLOCK_SIZE_M",
+        "BLOCK_SIZE_N",
+        "BLOCK_SIZE_K",
+        "GROUP_SIZE_M",
+        "num_warps",
+        "num_stages",
+    }
+    missing = required - set(config)
+    if missing:
+        raise ValueError(
+            f"VLLM_FL_MOE_FORCE_CONFIG is missing {sorted(missing)}; got {config}"
+        )
+
+    vllm_fused_moe._config = config
+    logger.warning(
+        "VLLM_FL_MOE_FORCE_CONFIG is set: every fused-MoE shape will use %s. "
+        "This is a debugging lever and costs throughput.",
+        config,
+    )
 
 
 def patch_minicpmo_resampler_device() -> None:
