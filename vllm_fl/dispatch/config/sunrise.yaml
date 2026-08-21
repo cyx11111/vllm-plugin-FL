@@ -80,7 +80,10 @@ op_backends:
 # FlagOS operator blacklist
 # Sunrise is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist: 
+    - linear
+    - mm
+    - mm_out
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
