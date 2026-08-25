@@ -402,7 +402,21 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead", "gcu", "kunlunxin", "sunrise"]:
+        # Current detection reports vendor_name="enflame" and
+        # device_type="gcu". Keep the legacy "gcu" vendor alias for images
+        # built with the earlier detector.
+        if cls.vendor_name in {
+            "nvidia",
+            "ascend",
+            "metax",
+            "hygon",
+            "mthreads",
+            "iluvatar",
+            "thead",
+            "gcu",
+            "enflame",
+            "kunlunxin",
+        }:
             return True
         return False
 
