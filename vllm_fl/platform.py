@@ -416,7 +416,10 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+<<<<<<< HEAD
             "sunrise"
+=======
+>>>>>>> upstream/release/0.2
         }:
             return True
         return False
