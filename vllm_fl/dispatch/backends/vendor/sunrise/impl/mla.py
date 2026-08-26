@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from typing import Optional, Union
+import inspect
+import math
+from typing import Callable, Optional, Union
 
 import torch
 
@@ -16,8 +18,75 @@ from vllm.model_executor.layers.attention.mla_attention import (
 )
 from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import AttentionLayer, AttentionType
+from vllm.v1.attention.backends.utils import reshape_query_for_spec_decode
 
 logger = init_logger(__name__)
+
+
+def _prepare_decode_query(
+    q: torch.Tensor, num_decodes: int
+) -> tuple[torch.Tensor, int, int, int, int]:
+    """Reshape decode ``q`` to ``[num_decodes, s_q, H, D]``.
+
+    vLLM flattens speculative / multi-token decode as
+    ``[num_decodes * query_len, H, D]``. Treating dim0 as batch with
+    ``s_q=1`` desynchronizes ``q`` from per-request ``block_table`` /
+    ``seq_lens``.
+    """
+    if q.ndim == 3:
+        q4 = reshape_query_for_spec_decode(q, num_decodes)
+    elif q.ndim == 4:
+        q4 = q
+        if q4.shape[0] != num_decodes:
+            raise ValueError(
+                "SunriseMLAImpl.forward_mqa: q.shape[0]="
+                f"{q4.shape[0]} does not match num_decodes={num_decodes}"
+            )
+    else:
+        raise ValueError(f"SunriseMLAImpl.forward_mqa: unexpected q.ndim={q.ndim}")
+
+    b, s_q, h, d = q4.shape
+    if s_q != 1:
+        # Current Sunrise FlagGems flash_mla launches one program per
+        # request and only reads the first query token of each. We cannot
+        # change that kernel from this plugin, so reject s_q > 1 instead
+        # of silently mis-mapping KV cache.
+        raise NotImplementedError(
+            "Sunrise flash_mla does not support speculative / multi-token "
+            f"decode (query_len={s_q} > 1). Disable speculative decoding "
+            "for MLA models on Sunrise."
+        )
+    return q4, b, s_q, h, d
+
+
+def _query_and_scale_for_flash_mla(
+    q4: torch.Tensor,
+    d: int,
+    scale: float,
+    flash_mla_fn: Callable,
+) -> tuple[torch.Tensor, dict]:
+    """Make kernel logits use vLLM ``scale`` without a FlagGems change.
+
+    Sunrise FlagGems ``flash_mla`` currently hardcodes ``sm_scale =
+    1/sqrt(d)`` where ``d`` is the absorbed MLA dim
+    (``kv_lora_rank + qk_rope_head_dim``). ``self.scale`` is computed
+    from the model's original QK head dim (and yarn mscale), so the two
+    usually differ. When the kernel accepts ``sm_scale`` we pass it
+    through; otherwise we pre-scale Q so
+    ``(Q * scale / kernel_scale) K^T * kernel_scale == Q K^T * scale``.
+    """
+    kwargs: dict = {}
+    try:
+        if "sm_scale" in inspect.signature(flash_mla_fn).parameters:
+            kwargs["sm_scale"] = scale
+            return q4, kwargs
+    except (TypeError, ValueError):
+        pass
+
+    kernel_scale = 1.0 / math.sqrt(d)
+    if scale != kernel_scale:
+        q4 = q4 * (scale / kernel_scale)
+    return q4, kwargs
 
 
 def torch_gather_and_maybe_dequant_cache(
@@ -228,16 +297,7 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
             q = torch.cat(q, dim=-1)
 
         assert isinstance(q, torch.Tensor)
-        # Common path: [B, H, D]. flash_mla wants [B, s_q, H, D].
-        if q.ndim == 3:
-            b, h, d = q.shape
-            s_q = 1
-            q4 = q.unsqueeze(1)
-        elif q.ndim == 4:
-            b, s_q, h, d = q.shape
-            q4 = q
-        else:
-            raise ValueError(f"SunriseMLAImpl.forward_mqa: unexpected q.ndim={q.ndim}")
+        q4, b, s_q, h, d = _prepare_decode_query(q, attn_metadata.num_decodes)
 
         head_dim_v = self.kv_lora_rank
         if d <= head_dim_v:
@@ -259,18 +319,9 @@ class SunriseMLAImpl(MLACommonImpl[MLACommonMetadata]):
                 f"shape={tuple(kv_cache.shape)}"
             )
 
-        # flash_mla returns [B, s_q, H, dv]; common layer wants [B, H, dv]
-        # (s_q==1 for pure decode). Pass vLLM softmax scale when supported.
-        # Current Sunrise FlagGems ``flash_mla`` hardcodes 1/sqrt(d); optional
-        # ``sm_scale`` is accepted when newer FlagGems exposes it.
-        flash_mla_kwargs = {}
-        try:
-            import inspect
-
-            if "sm_scale" in inspect.signature(flash_mla).parameters:
-                flash_mla_kwargs["sm_scale"] = self.scale
-        except (TypeError, ValueError):
-            pass
+        q4, flash_mla_kwargs = _query_and_scale_for_flash_mla(
+            q4, d, self.scale, flash_mla
+        )
         o = flash_mla(
             q4,
             attn_metadata.decode.block_table,
