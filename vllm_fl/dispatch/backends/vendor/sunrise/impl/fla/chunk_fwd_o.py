@@ -33,9 +33,13 @@ def chunk_fwd_o(
     ``chunk_indices`` to be populated.
     """
     if cu_seqlens is None:
-        from vllm.model_executor.layers.fla.ops.chunk_o import (
-            chunk_fwd_o as _fla_chunk_fwd_o,
-        )
+        from ...patches.patch_fla_ops import get_orig_chunk_fwd_o
+
+        _fla_chunk_fwd_o = get_orig_chunk_fwd_o()
+        if _fla_chunk_fwd_o is None:
+            from vllm.model_executor.layers.fla.ops.chunk_o import (
+                chunk_fwd_o as _fla_chunk_fwd_o,
+            )
 
         return _fla_chunk_fwd_o(
             q,

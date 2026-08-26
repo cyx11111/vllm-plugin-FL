@@ -35,9 +35,13 @@ def chunk_local_cumsum(
     fallback is purely a safety net.
     """
     if reverse or head_first or cu_seqlens is None:
-        from vllm.model_executor.layers.fla.ops.cumsum import (
-            chunk_local_cumsum as _fla_chunk_local_cumsum,
-        )
+        from ...patches.patch_fla_ops import get_orig_chunk_local_cumsum
+
+        _fla_chunk_local_cumsum = get_orig_chunk_local_cumsum()
+        if _fla_chunk_local_cumsum is None:
+            from vllm.model_executor.layers.fla.ops.cumsum import (
+                chunk_local_cumsum as _fla_chunk_local_cumsum,
+            )
 
         return _fla_chunk_local_cumsum(
             g,

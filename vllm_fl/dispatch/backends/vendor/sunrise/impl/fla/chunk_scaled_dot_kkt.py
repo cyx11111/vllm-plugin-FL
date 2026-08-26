@@ -28,9 +28,13 @@ def chunk_scaled_dot_kkt_fwd(
     a safety net for unusual callers).
     """
     if beta is None or cu_seqlens is None:
-        from vllm.model_executor.layers.fla.ops.chunk_scaled_dot_kkt import (
-            chunk_scaled_dot_kkt_fwd as _fla_chunk_scaled_dot_kkt_fwd,
-        )
+        from ...patches.patch_fla_ops import get_orig_chunk_scaled_dot_kkt_fwd
+
+        _fla_chunk_scaled_dot_kkt_fwd = get_orig_chunk_scaled_dot_kkt_fwd()
+        if _fla_chunk_scaled_dot_kkt_fwd is None:
+            from vllm.model_executor.layers.fla.ops.chunk_scaled_dot_kkt import (
+                chunk_scaled_dot_kkt_fwd as _fla_chunk_scaled_dot_kkt_fwd,
+            )
 
         return _fla_chunk_scaled_dot_kkt_fwd(
             k,

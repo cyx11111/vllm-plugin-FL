@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 _PATCH_APPLIED = False
 _ORIG_FUSED_SIGMOID_GATING_DELTA_RULE_UPDATE = None
 _ORIG_FUSED_RECURRENT_GATED_DELTA_RULE_PACKED_DECODE = None
+_ORIG_SOLVE_TRIL = None
+_ORIG_CHUNK_FWD_O = None
+_ORIG_CHUNK_GATED_DELTA_RULE_FWD_H = None
+_ORIG_CHUNK_SCALED_DOT_KKT_FWD = None
+_ORIG_CHUNK_LOCAL_CUMSUM = None
 
 
 def get_orig_fused_sigmoid_gating_delta_rule_update():
@@ -21,6 +26,31 @@ def get_orig_fused_sigmoid_gating_delta_rule_update():
 def get_orig_fused_recurrent_gated_delta_rule_packed_decode():
     """Return the un-patched FLA Triton ``...packed_decode``."""
     return _ORIG_FUSED_RECURRENT_GATED_DELTA_RULE_PACKED_DECODE
+
+
+def get_orig_solve_tril():
+    """Return the un-patched FLA Triton ``solve_tril``."""
+    return _ORIG_SOLVE_TRIL
+
+
+def get_orig_chunk_fwd_o():
+    """Return the un-patched FLA Triton ``chunk_fwd_o``."""
+    return _ORIG_CHUNK_FWD_O
+
+
+def get_orig_chunk_gated_delta_rule_fwd_h():
+    """Return the un-patched FLA Triton ``chunk_gated_delta_rule_fwd_h``."""
+    return _ORIG_CHUNK_GATED_DELTA_RULE_FWD_H
+
+
+def get_orig_chunk_scaled_dot_kkt_fwd():
+    """Return the un-patched FLA Triton ``chunk_scaled_dot_kkt_fwd``."""
+    return _ORIG_CHUNK_SCALED_DOT_KKT_FWD
+
+
+def get_orig_chunk_local_cumsum():
+    """Return the un-patched FLA Triton ``chunk_local_cumsum``."""
+    return _ORIG_CHUNK_LOCAL_CUMSUM
 
 
 def apply_patch() -> bool:
@@ -67,6 +97,23 @@ def apply_patch() -> bool:
     _ORIG_FUSED_RECURRENT_GATED_DELTA_RULE_PACKED_DECODE = (
         _fla_fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode
     )
+    # Snapshot prefill-stage originals *before* rebinding. Fallback paths
+    # must call these references; re-importing the same module after the
+    # patch would resolve back to the PTPU wrapper and recurse.
+    global _ORIG_SOLVE_TRIL
+    _ORIG_SOLVE_TRIL = _fla_solve_tril.solve_tril
+    global _ORIG_CHUNK_FWD_O
+    _ORIG_CHUNK_FWD_O = _fla_chunk_o.chunk_fwd_o
+    global _ORIG_CHUNK_GATED_DELTA_RULE_FWD_H
+    _ORIG_CHUNK_GATED_DELTA_RULE_FWD_H = (
+        _fla_chunk_delta_h.chunk_gated_delta_rule_fwd_h
+    )
+    global _ORIG_CHUNK_SCALED_DOT_KKT_FWD
+    _ORIG_CHUNK_SCALED_DOT_KKT_FWD = (
+        _fla_chunk_scaled_dot_kkt.chunk_scaled_dot_kkt_fwd
+    )
+    global _ORIG_CHUNK_LOCAL_CUMSUM
+    _ORIG_CHUNK_LOCAL_CUMSUM = _fla_cumsum.chunk_local_cumsum
 
     from ..impl.fla.chunk_fwd_o import chunk_fwd_o as _ptpu_chunk_fwd_o
     from ..impl.fla.chunk_h import (
@@ -150,6 +197,11 @@ def apply_patch() -> bool:
 
 __all__ = [
     "apply_patch",
+    "get_orig_chunk_fwd_o",
+    "get_orig_chunk_gated_delta_rule_fwd_h",
+    "get_orig_chunk_local_cumsum",
+    "get_orig_chunk_scaled_dot_kkt_fwd",
     "get_orig_fused_recurrent_gated_delta_rule_packed_decode",
     "get_orig_fused_sigmoid_gating_delta_rule_update",
+    "get_orig_solve_tril",
 ]

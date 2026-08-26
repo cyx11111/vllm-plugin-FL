@@ -24,9 +24,16 @@ def _fla_fallback(
     chunk_indices: Optional[torch.Tensor],
     output_dtype: torch.dtype,
 ) -> torch.Tensor:
-    from vllm.model_executor.layers.fla.ops.solve_tril import (
-        solve_tril as _fla_solve_tril,
-    )
+    # Use the snapshot saved by ``patch_fla_ops.apply_patch``. Re-importing
+    # ``vllm.model_executor.layers.fla.ops.solve_tril.solve_tril`` after the
+    # patch resolves to this wrapper and recurses.
+    from ...patches.patch_fla_ops import get_orig_solve_tril
+
+    _fla_solve_tril = get_orig_solve_tril()
+    if _fla_solve_tril is None:
+        from vllm.model_executor.layers.fla.ops.solve_tril import (
+            solve_tril as _fla_solve_tril,
+        )
 
     return _fla_solve_tril(
         A,

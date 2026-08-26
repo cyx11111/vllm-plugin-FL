@@ -74,9 +74,13 @@ def _fla_fallback(
     chunk_indices: Optional[torch.Tensor],
     chunk_offsets: Optional[torch.Tensor],
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
-    from vllm.model_executor.layers.fla.ops.chunk_delta_h import (
-        chunk_gated_delta_rule_fwd_h as _fla_chunk_gated_delta_rule_fwd_h,
-    )
+    from ...patches.patch_fla_ops import get_orig_chunk_gated_delta_rule_fwd_h
+
+    _fla_chunk_gated_delta_rule_fwd_h = get_orig_chunk_gated_delta_rule_fwd_h()
+    if _fla_chunk_gated_delta_rule_fwd_h is None:
+        from vllm.model_executor.layers.fla.ops.chunk_delta_h import (
+            chunk_gated_delta_rule_fwd_h as _fla_chunk_gated_delta_rule_fwd_h,
+        )
 
     return _fla_chunk_gated_delta_rule_fwd_h(
         k=k,
