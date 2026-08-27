@@ -194,6 +194,9 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type == "ptpu":
+            import vllm_fl.dispatch.backends.vendor.sunrise  # noqa: F401
+
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
@@ -413,6 +416,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "sunrise"
         }:
             return True
         return False
@@ -464,6 +468,8 @@ class PlatformFL(Platform):
             import vllm_fl.dispatch.backends.vendor.ascend
         elif cls.device_name == "gcu":
             import vllm_fl.dispatch.backends.vendor.gcu  # noqa: F401
+        elif cls.device_type == "ptpu":
+            import vllm_fl.dispatch.backends.vendor.sunrise  # noqa: F401
 
     @classmethod
     def supports_fp8(cls) -> bool:
