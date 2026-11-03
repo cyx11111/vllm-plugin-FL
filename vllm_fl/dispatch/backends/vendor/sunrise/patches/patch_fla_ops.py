@@ -1,6 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Redirect FLA GDN kernels to PTPU sgl_kernel implementations."""
+"""Redirect supported FLA GDN kernels to PTPU sgl_kernel implementations.
+
+``chunk_gated_delta_rule_fwd_h`` and ``chunk_fwd_o`` stay on FLA Triton:
+their PTPU launchers can exceed the grid limit on wide varlen prefills.
+"""
 
 from __future__ import annotations
 
@@ -54,7 +58,7 @@ def get_orig_chunk_local_cumsum():
 
 
 def apply_patch() -> bool:
-    """Idempotently install the PTPU FLA dispatch patch (all stages → sgl)."""
+    """Idempotently install the safe PTPU FLA dispatch subset."""
     global _PATCH_APPLIED
     if _PATCH_APPLIED:
         return False
@@ -115,10 +119,6 @@ def apply_patch() -> bool:
     global _ORIG_CHUNK_LOCAL_CUMSUM
     _ORIG_CHUNK_LOCAL_CUMSUM = _fla_cumsum.chunk_local_cumsum
 
-    from ..impl.fla.chunk_fwd_o import chunk_fwd_o as _ptpu_chunk_fwd_o
-    from ..impl.fla.chunk_h import (
-        chunk_gated_delta_rule_fwd_h as _ptpu_chunk_gated_delta_rule_fwd_h,
-    )
     from ..impl.fla.chunk_scaled_dot_kkt import (
         chunk_scaled_dot_kkt_fwd as _ptpu_chunk_scaled_dot_kkt_fwd,
     )
@@ -140,17 +140,11 @@ def apply_patch() -> bool:
     )
     _fla_solve_tril.solve_tril = _ptpu_solve_tril
     _fla_wy_fast.recompute_w_u_fwd = _ptpu_recompute_w_u_fwd
-    _fla_chunk_delta_h.chunk_gated_delta_rule_fwd_h = (
-        _ptpu_chunk_gated_delta_rule_fwd_h
-    )
-    _fla_chunk_o.chunk_fwd_o = _ptpu_chunk_fwd_o
 
     _fla_chunk.chunk_local_cumsum = _ptpu_chunk_local_cumsum
     _fla_chunk.chunk_scaled_dot_kkt_fwd = _ptpu_chunk_scaled_dot_kkt_fwd
     _fla_chunk.solve_tril = _ptpu_solve_tril
     _fla_chunk.recompute_w_u_fwd = _ptpu_recompute_w_u_fwd
-    _fla_chunk.chunk_gated_delta_rule_fwd_h = _ptpu_chunk_gated_delta_rule_fwd_h
-    _fla_chunk.chunk_fwd_o = _ptpu_chunk_fwd_o
     _fla_chunk.l2norm_fwd = _ptpu_l2norm_fwd
 
     # Decode / aux
@@ -189,8 +183,9 @@ def apply_patch() -> bool:
 
     _PATCH_APPLIED = True
     logger.info(
-        "Applied PTPU FLA patch: all 6 GDN prefill stages + spec/mixed "
-        "decode + l2norm + packed_decode route to torch_ptpu.sgl_kernel."
+        "Applied PTPU FLA patch: 4 GDN prefill stages + spec/mixed decode "
+        "+ l2norm + packed_decode route to torch_ptpu.sgl_kernel; "
+        "chunk_gated_delta_rule_fwd_h / chunk_fwd_o stay on FLA Triton."
     )
     return True
 

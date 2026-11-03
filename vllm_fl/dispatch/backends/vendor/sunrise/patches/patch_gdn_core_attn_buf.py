@@ -66,6 +66,7 @@ def _in_cudagraph_capture() -> bool:
     except Exception:
         return False
 
+
 # When ``forward_cuda`` is active, the wrapper publishes the expected
 # ``(shape, dtype, device, cached_buffer)`` tuple here. ``_intercepted_zeros``
 # checks this slot; if the next ``torch.zeros`` call originating from

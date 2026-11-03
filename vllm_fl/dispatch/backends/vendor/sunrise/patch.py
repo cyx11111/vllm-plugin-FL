@@ -9,6 +9,7 @@ model construction. Import-time patches live in ``patches/__init__.py``.
 import logging
 import os
 import sys
+from contextlib import contextmanager
 
 import torch
 
@@ -35,6 +36,7 @@ def apply_sunrise_patches():
     patch_ptpu_penalties_bincount()
     patch_distributed_runtime()
     patch_ptpu_cudagraph()
+    patch_async_input_prep_event_stream()
     patch_op_cls()
     patch_accelerator_empty_cache()
     patch_memory_profiling_for_plain_allocator()
@@ -46,6 +48,45 @@ def apply_sunrise_patches():
     patch_moe_force_config()
     patch_native_moe_ops()
     patch_native_int8_routing()
+
+
+def patch_async_input_prep_event_stream() -> None:
+    """Record the async input-prep Event on the explicit PTPU stream.
+
+    ``torch.Event.record()`` without a stream resolves through generic
+    PrivateUse1 current-stream state. Sunrise's CUDA compatibility shims keep a
+    separate PTPU stream TLS, so the generic lookup can record an event on a
+    stream other than the one carrying the non-blocking input copies. Recording
+    the live PTPU stream preserves event-based overlap without a device-wide
+    synchronize.
+    """
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    original = ModelRunnerFL.synchronize_input_prep
+    if getattr(original, "_sunrise_ptpu_event_stream_patched", False):
+        return
+
+    @contextmanager
+    def _synchronize_input_prep(self):
+        if self.prepare_inputs_event is None:
+            yield
+            return
+
+        self.prepare_inputs_event.synchronize()
+        try:
+            yield
+        finally:
+            stream = torch.ptpu.current_stream(self.device)
+            self.prepare_inputs_event.record(
+                getattr(stream, "torch_stream", stream)
+            )
+
+    _synchronize_input_prep._sunrise_ptpu_event_stream_patched = True
+    _synchronize_input_prep.__wrapped__ = original
+    ModelRunnerFL.synchronize_input_prep = _synchronize_input_prep
+    logger.info(
+        "Patched async input preparation Event to record on the live PTPU stream"
+    )
 
 
 def patch_native_moe_ops() -> None:

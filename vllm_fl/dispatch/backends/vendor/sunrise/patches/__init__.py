@@ -8,9 +8,10 @@ before model construction and before deferred patches in ``patch.py``.
 
 Classification
 --------------
-* **Import-time** (this module): FLA/GDN kernel rebinds, FlagGems pointwise
-  fast-path, GDN core-attn buffer reuse, compressed-tensors INT8 enablement,
-  optional decode profiler, torch profiler PrivateUse1 bridge.
+* **Import-time** (this module): ptpu-opmux runtime compatibility (index-less
+  devices and c10 Event DeviceGuard), FLA/GDN kernel rebinds, FlagGems
+  pointwise fast-path, GDN core-attn buffer reuse, compressed-tensors INT8
+  enablement, optional decode profiler, torch profiler PrivateUse1 bridge.
 * **Deferred** (``patch.apply_sunrise_patches``): CUDA stream shims, FlagCX
   comm/collectives, cudagraph, sampler/penalties, distributed runtime, OOT
   layer registration, the ``_moe_C`` dispatch shims, and other worker-init
@@ -18,13 +19,21 @@ Classification
   ``register_oot_ops`` installs the generic FL W8A8 selector in between.
 """
 
+from . import patch_device_index
+from . import patch_bf16_linear
 from . import patch_fla_ops
 from . import patch_gdn_core_attn_buf
 from . import patch_int8_native
+from . import patch_mlp_act_quant
+from . import patch_moe_act_quant
 from . import patch_moe_config
 from . import patch_pointwise
 from . import patch_profile_decode
 from . import patch_profiler
+
+# Runtime fixes must precede PTPU allocations and torch.Event.record().
+# Model init and memory profiling can run before FlagCX calls opmux.enable().
+patch_device_index.apply_patch()
 
 # FlagGems pointwise fast-path (must run before any FlagGems op dispatch).
 patch_pointwise.apply_patch()
@@ -41,6 +50,13 @@ patch_int8_native.enable_native_int8()
 # Fused-MoE tile config from FlagGems' sunrise backend, not vLLM's NVIDIA
 # heuristic (whose prefill tile overflows PTPU registers and hangs the w2 GEMM).
 patch_moe_config.apply_patch()
+
+# Fuse routed-expert and dense/shared-expert activation quantization.
+patch_moe_act_quant.apply_patch()
+patch_mlp_act_quant.apply_patch()
+
+# Route supported BF16 dense linears through the vendor GEMM.
+patch_bf16_linear.apply_patch()
 
 # Optional per-operator decode-step profiler (env-gated).
 patch_profile_decode.install()

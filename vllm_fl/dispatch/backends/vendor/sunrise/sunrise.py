@@ -114,7 +114,7 @@ class SunriseBackend(Backend):
         ignore_invalid_experts: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Align MoE token blocks (PyTorch fallback; FlagGems stays default)."""
-        from .impl.fused_moe import moe_align_block_size_sunrise
+        from .impl.moe_align import moe_align_block_size_sunrise
 
         return moe_align_block_size_sunrise(
             topk_ids,

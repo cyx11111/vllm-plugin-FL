@@ -205,6 +205,11 @@ class PlatformFL(Platform):
 
         if cls.device_type == "ptpu":
             import vllm_fl.dispatch.backends.vendor.sunrise  # noqa: F401
+            from vllm_fl.dispatch.backends.vendor.sunrise.impl.int8 import (
+                moe_scratch,
+            )
+
+            moe_scratch.note_vllm_config(vllm_config)
 
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config

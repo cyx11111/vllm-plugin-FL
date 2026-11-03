@@ -9,6 +9,8 @@ from typing import Optional
 import torch
 from vllm.utils.math_utils import round_up
 
+from . import moe_sum
+
 
 def topk_softmax_sunrise(
     topk_weights: torch.Tensor,
@@ -77,6 +79,11 @@ def moe_sum_sunrise(inp: torch.Tensor, out: torch.Tensor) -> None:
     Triton kernel, which accumulates in ``float32`` and only casts on store
     (see FlagGems ``moe_sum``). A plain bf16 ``torch.sum`` on PTPU can
     accumulate in the output dtype and lose precision across many layers.
+
+    The Triton path in ``impl.moe_sum`` handles the 3-D/2-D case vLLM actually
+    passes; it accumulates in fp32 the same way, so the two agree bitwise. The
+    torch reduction below stays as the fallback for the wider
+    ``[tokens, topk, ...]`` contract.
     """
     if inp.dim() < 2 or out.dim() < 1:
         raise ValueError(
@@ -89,6 +96,10 @@ def moe_sum_sunrise(inp: torch.Tensor, out: torch.Tensor) -> None:
             f"inp.shape[-1]={inp.shape[-1]} vs out.shape[-1]={out.shape[-1]}"
         )
 
+    if moe_sum.is_supported(inp, out):
+        moe_sum.moe_sum_triton(inp, out)
+        return
+
     if inp.dtype in (torch.bfloat16, torch.float16):
         acc = torch.sum(inp, dim=-2, dtype=torch.float32)
         out.copy_(acc.to(out.dtype))
@@ -96,7 +107,7 @@ def moe_sum_sunrise(inp: torch.Tensor, out: torch.Tensor) -> None:
         torch.sum(inp, dim=-2, out=out)
 
 
-def moe_align_block_size_sunrise(
+def moe_align_block_size_reference(
     topk_ids: torch.Tensor,
     block_size: int,
     num_experts: int,
@@ -104,11 +115,16 @@ def moe_align_block_size_sunrise(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """PyTorch reference ``moe_align_block_size`` for PTPU (opt-in fallback).
+    """PyTorch oracle for ``moe_align_block_size``.
 
-    Default dispatch keeps FlagGems Triton first. Enable this path via
-    ``VLLM_FL_PER_OP`` / yaml reorder only when the FlagGems kernel hangs or
-    misbehaves for a given expert/token shape.
+    Not a production path: it loops over every expert in Python and syncs on
+    ``.item()``. It exists as an implementation-independent reference for the
+    Triton kernel in ``impl/moe_align.py`` (see
+    ``sunrise-test-tools/moe_align_bench.py``), and as a last-resort fallback if
+    both Triton paths misbehave for some expert/token shape.
+
+    Unlike the Triton and FlagGems paths this one sorts stably, so tokens come
+    out in ascending index order within an expert.
     """
     del ignore_invalid_experts  # reference path counts all experts in topk_ids
 
@@ -195,5 +211,5 @@ def moe_align_block_size_sunrise(
 __all__ = [
     "topk_softmax_sunrise",
     "moe_sum_sunrise",
-    "moe_align_block_size_sunrise",
+    "moe_align_block_size_reference",
 ]

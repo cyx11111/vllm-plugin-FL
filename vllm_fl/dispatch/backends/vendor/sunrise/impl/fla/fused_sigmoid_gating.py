@@ -8,6 +8,8 @@ from typing import Optional, Tuple
 
 import torch
 
+from ._gdn_param_cast import cast_gdn_params_for_ptpu
+
 
 def fused_sigmoid_gating_delta_rule_update(
     A_log: torch.Tensor,
@@ -90,6 +92,10 @@ def fused_sigmoid_gating_delta_rule_update(
         fused_sigmoid_gating_delta_rule_update as _ptpu_fused_sigmoid_gating,
     )
 
+    kernel_A_log, kernel_dt_bias = cast_gdn_params_for_ptpu(
+        A_log, dt_bias, a.dtype
+    )
+
     # Layout transpose: vLLM's ``ssm_state`` is laid out [num_blocks, HV, V, K]
     # but PTPU's kernel expects [slot, HV, K, V]. Build a small per-call
     # working buffer that contains only the slots referenced by
@@ -110,9 +116,9 @@ def fused_sigmoid_gating_delta_rule_update(
     )
 
     o = _ptpu_fused_sigmoid_gating(
-        A_log,
+        kernel_A_log,
         a,
-        dt_bias,
+        kernel_dt_bias,
         beta,
         threshold,
         q,

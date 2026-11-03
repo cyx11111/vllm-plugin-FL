@@ -736,6 +736,13 @@ class ModelRunnerFL(
         else:
             self.cudagraph_batch_sizes = []
 
+        if current_platform.device_type == "ptpu":
+            from vllm_fl.dispatch.backends.vendor.sunrise.impl.int8 import (
+                moe_scratch,
+            )
+
+            moe_scratch.note_capture_sizes(self.cudagraph_batch_sizes)
+
         # Cache the device properties.
         self._init_device_properties()
 

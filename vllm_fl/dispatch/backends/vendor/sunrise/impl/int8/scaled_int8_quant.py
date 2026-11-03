@@ -18,6 +18,10 @@ _INT8_MIN = -128
 _INT8_MAX = 127
 # Symmetric int8 uses 127 as the scale denominator so +/-amax maps to +/-127.
 _SCALE_DENOM = 127.0
+# Floor on the amax, so an all-zero row does not divide by zero. Named because
+# deepgemm_moe's fused quantize-and-permute has to reproduce this arithmetic
+# exactly to stay bit-identical to quantizing separately.
+_QUANT_EPS = 1e-10
 
 
 @triton.jit
@@ -159,7 +163,7 @@ def _static_quant(input, scale, azp, symmetric):
 def dynamic_scaled_int8_quant(
     input: torch.Tensor,
     symmetric: bool = True,
-    eps: float = 1e-10,
+    eps: float = _QUANT_EPS,
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """Dynamic per-token INT8 quantization (Triton, torch fallback)."""
     assert input.shape[-1] >= 1

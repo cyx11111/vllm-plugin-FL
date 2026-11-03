@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ _QUANT_PATCHED = False
 _MOE_ACT_QUANT_PATCHED = False
 _MM_PATCHED = False
 _FG_MM_FN = None
+_MM_IMPL_NAME = "?"
 _MM_SHAPE_LOGGED = False
 
 
@@ -145,18 +147,46 @@ def _patch_scaled_int8_quant() -> bool:
     return True
 
 
+def _use_flag_gems_scaled_mm() -> bool:
+    val = os.environ.get("VLLM_FL_SUNRISE_BENCH_BASELINE_INT8_SCALED_MM")
+    if val is None:
+        return False
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _resolve_fg_scaled_mm():
-    """Return FlagGems' autotuned INT8 ``scaled_mm`` (cached)."""
-    global _FG_MM_FN
+    """Return the INT8 ``scaled_mm`` to run (cached).
+
+    Defaults to the sunrise kernel in ``impl/int8/scaled_mm.py``, which
+    reaches the PTPU INT8 MMA that FlagGems' generic kernel cannot. Set
+    ``VLLM_FL_SUNRISE_BENCH_BASELINE_INT8_SCALED_MM=1`` to run FlagGems'
+    kernel instead. ``_fl_triton_scaled_mm`` also falls back to vLLM's
+    ``triton_scaled_mm`` if this one raises.
+    """
+    global _FG_MM_FN, _MM_IMPL_NAME
     if _FG_MM_FN is not None:
         return _FG_MM_FN
+
+    if not _use_flag_gems_scaled_mm():
+        try:
+            from ..impl.int8.scaled_mm import scaled_mm as _fl_mm
+            _FG_MM_FN = _fl_mm
+            _MM_IMPL_NAME = "sunrise impl/int8 scaled_mm"
+            return _fl_mm
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "native-int8: sunrise scaled_mm unavailable (%s); using "
+                "FlagGems scaled_mm.", e,
+            )
+
     from flag_gems.ops.scaled_mm import scaled_mm as _fg
     _FG_MM_FN = _fg
+    _MM_IMPL_NAME = "FlagGems scaled_mm"
     return _fg
 
 
 def _patch_triton_scaled_mm() -> bool:
-    """Route vLLM's ``triton_scaled_mm`` to FlagGems' autotuned ``scaled_mm``."""
+    """Route vLLM's ``triton_scaled_mm`` to the sunrise INT8 ``scaled_mm``."""
     global _MM_PATCHED
     if _MM_PATCHED:
         return True
@@ -202,9 +232,10 @@ def _patch_triton_scaled_mm() -> bool:
         if not _MM_SHAPE_LOGGED:
             _MM_SHAPE_LOGGED = True
             logger.info(
-                "native-int8: triton_scaled_mm->FlagGems scaled_mm active. "
+                "native-int8: triton_scaled_mm->%s active. "
                 "input=%s (2d=%s) weight=%s (transposed=%s) scale_a=%s "
                 "scale_b=%s out_dtype=%s bias=%s",
+                _MM_IMPL_NAME,
                 tuple(input_shape), tuple(input.shape),
                 tuple(weight.shape), transposed,
                 tuple(scale_a.shape), tuple(scale_b.shape) if scale_b is not None
@@ -215,8 +246,8 @@ def _patch_triton_scaled_mm() -> bool:
             out = fg(input, mat2, scale_a, sb, bias=bias, out_dtype=out_dtype)
         except Exception as e:  # noqa: BLE001
             logger.warning(
-                "native-int8: FlagGems scaled_mm failed (%s); falling back to "
-                "vLLM triton_scaled_mm.", e,
+                "native-int8: %s failed (%s); falling back to "
+                "vLLM triton_scaled_mm.", _MM_IMPL_NAME, e,
             )
             out = _orig(input, weight, scale_a, scale_b, out_dtype, bias,
                         *args, **kwargs)
@@ -240,10 +271,20 @@ def _patch_triton_scaled_mm() -> bool:
             _mod.triton_scaled_mm = _fl_triton_scaled_mm
 
     _MM_PATCHED = True
+    _resolve_fg_scaled_mm()  # resolve now so the log names the active kernel
     logger.info(
-        "native-int8: patched triton_scaled_mm -> FlagGems scaled_mm "
-        "(autotuned INT8 GEMM) on sunrise."
+        "native-int8: patched triton_scaled_mm -> %s on sunrise.", _MM_IMPL_NAME
     )
+
+    from ..impl.int8 import dense_gemm
+
+    if dense_gemm.available():
+        logger.info(
+            "native-int8: dense INT8 linears first offer themselves to the "
+            "deepgemm_ptpu GEMM; narrow-N, shallow-K and decode-tile shapes "
+            "keep Triton. Disable with "
+            "VLLM_FL_SUNRISE_BENCH_BASELINE_DENSE_INT8_GEMM=1."
+        )
     return True
 
 
@@ -404,6 +445,12 @@ def enable_native_int8() -> None:
     global _ENABLED
     if _ENABLED:
         return
+    # The scaled_mm dispatch below has to know when a graph is being recorded:
+    # one of the kernels it can reach throws while capturing and leaves the
+    # capture unusable. See impl/capture.py.
+    from ..impl.capture import install as install_capture_tracker
+
+    install_capture_tracker()
     ok_kernel = _register_oot_int8_kernel()
     ok_quant = _patch_scaled_int8_quant()
     ok_mm = _patch_triton_scaled_mm()

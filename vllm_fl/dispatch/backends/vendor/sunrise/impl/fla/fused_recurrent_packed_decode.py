@@ -12,6 +12,7 @@ from ._gdn_state_transpose import (
     gather_transpose_to_scratch,
     transpose_scatter_to_pool,
 )
+from ._gdn_param_cast import cast_gdn_params_for_ptpu
 
 
 # Pre-allocated scratch buffers for cudagraph-safe decode.
@@ -212,10 +213,13 @@ def fused_recurrent_gated_delta_rule_packed_decode(
         fused_sigmoid_gating_delta_rule_update as _ptpu_fused_sigmoid_gating,
     )
 
+    kernel_A_log, kernel_dt_bias = cast_gdn_params_for_ptpu(
+        A_log, dt_bias, a.dtype
+    )
     o = _ptpu_fused_sigmoid_gating(
-        A_log,
+        kernel_A_log,
         a,
-        dt_bias,
+        kernel_dt_bias,
         1.0,
         20.0,
         q,
